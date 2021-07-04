@@ -1,0 +1,477 @@
+<html lang="en">
+<head>
+    <title>Physics</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+        body {
+            color: #61443e;
+            font-family:Monospace;
+            font-size:13px;
+            text-align:center;
+
+            background-color: #bfd1e5;
+            margin: 0px;
+            overflow: hidden;
+        }
+
+        #info {
+            position: absolute;
+            top: 0px; width: 100%;
+            padding: 5px;
+        }
+
+        a {
+
+            color: #a06851;
+        }
+
+    </style>
+</head>
+<body>
+<div id="info">Physics<br>by Cath</div>
+<div id="container"><br /><br /><br /><br /><br />Loading...</div>
+
+<script src="build/three.js"></script>
+<script src="js/libs/ammo.js"></script>
+<script src="js/controls/OrbitControls.js"></script>
+<script src="js/Detector.js"></script>
+<script src="js/libs/dat.gui.min.js"></script>
+<script src="js/libs/stats.min.js"></script>
+
+<script>
+
+    // Detects webgl
+    if ( ! Detector.webgl ) {
+        Detector.addGetWebGLMessage();
+        document.getElementById( 'container' ).innerHTML = "";
+    }
+
+    // - Global variables -
+
+    // Graphics variables
+    var container, stats;
+    var camera, controls, scene, renderer;
+    var textureLoader;
+    var clock = new THREE.Clock();
+
+    // Physics variables
+    var gravityConstant = -9.8;
+    var collisionConfiguration;
+    var dispatcher;
+    var broadphase;
+    var solver;
+    var softBodySolver;
+    var physicsWorld;
+    var rigidBodies = [];
+    var margin = 0.05;
+    var transformAux1 = new Ammo.btTransform();
+
+    var time = 0;
+    var gui;
+    var raycaster = new THREE.Raycaster();
+
+    //ball properties
+    var ballMass = 1;
+    var ballRadius = 0.6;
+    var ballBody;
+    //ball properties
+    var ball2Mass = 2;
+    var ball2Radius = 1;
+    var ball2Body;
+    var u = 0, v = 0;
+
+    var params = {
+        gravity: gravityConstant,
+
+        horizontalVelocity: 14,
+        verticalVelocity: 10,
+        horizontalAngle: -0.85,
+        verticalAngle: 0,
+        restitution: 0.8,
+        rotationFriction: 0.5,
+        ballMass: ballMass,
+        ballRadius: ballRadius,
+
+        horizontalVelocity2: 14,
+        verticalVelocity2: 10,
+        horizontalAngle2: -0.85,
+        verticalAngle2: 0,
+        restitution2: 0.8,
+        rotationFriction2: 0.5,
+        ballMass2: ball2Mass,
+        ballRadius2: ball2Radius,
+
+        shoot: function(){ shoot() },
+        recalculate: function(){ rebuild() }
+    };
+    // - Main code -
+
+    init();
+    animate();
+
+
+    // - Functions -
+
+    function init() {
+
+        initGraphics();
+
+        initGUI();
+
+        initPhysics();
+
+        createObjects();
+
+        initInput();
+
+    }
+
+    function initGraphics() {
+
+        container = document.getElementById( 'container' );
+
+        camera = new THREE.PerspectiveCamera( 60, window.innerWidth / window.innerHeight, 0.2, 2000 );
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color( 0x99ccff );
+
+        camera.position.set( 0, 10, 20 );
+
+
+        renderer = new THREE.WebGLRenderer();
+        renderer.setPixelRatio( window.devicePixelRatio );
+        renderer.setSize( window.innerWidth, window.innerHeight );
+        renderer.shadowMap.enabled = true;
+
+
+        controls = new THREE.OrbitControls( camera, renderer.domElement );
+        controls.target.set( 0, 2, 0 );
+        controls.update();
+        textureLoader = new THREE.TextureLoader();
+
+        var ambientLight = new THREE.AmbientLight( 0x404040 );
+        scene.add( ambientLight );
+
+        var light = new THREE.DirectionalLight( 0xffffff, 1 );
+        light.position.set( -10, 15, 5 );
+        light.castShadow = true;
+        var d = 10;
+        light.shadow.camera.left = -d;
+        light.shadow.camera.right = d;
+        light.shadow.camera.top = d;
+        light.shadow.camera.bottom = -d;
+
+        light.shadow.camera.near = 1;
+        light.shadow.camera.far = 500;
+
+        light.shadow.mapSize.x = 4096;
+        light.shadow.mapSize.y = 4096;
+
+        scene.add( light );
+
+
+        container.innerHTML = "";
+
+        container.appendChild( renderer.domElement );
+
+        stats = new Stats();
+        stats.domElement.style.position = 'absolute';
+        stats.domElement.style.top = '0px';
+        container.appendChild( stats.domElement );
+
+        //
+
+        window.addEventListener( 'resize', onWindowResize, false );
+
+    }
+
+    function initPhysics() {
+
+        // Physics configuration
+
+        collisionConfiguration = new Ammo.btSoftBodyRigidBodyCollisionConfiguration();
+        dispatcher = new Ammo.btCollisionDispatcher( collisionConfiguration );
+        broadphase = new Ammo.btDbvtBroadphase();
+        solver = new Ammo.btSequentialImpulseConstraintSolver();
+        physicsWorld = new Ammo.btSoftRigidDynamicsWorld( dispatcher, broadphase, solver, collisionConfiguration);
+        physicsWorld.setGravity( new Ammo.btVector3( 0, params.gravity, 0 ) );
+        //physicsWorld.getWorldInfo().set_m_gravity( new Ammo.btVector3( 0, params.gravity, 0 ) );
+
+    }
+
+    function createObjects() {
+
+        var pos = new THREE.Vector3();
+        var quat = new THREE.Quaternion();
+
+        // Ground
+        pos.set( 0, - 0.5, 0 );
+        quat.set( 0, 0, 0, 1 );
+        var ground = createParalellepiped( 40, 1, 40, 0, pos, quat, new THREE.MeshPhongMaterial( { color: 0xe5e288 } ) );
+        ground.castShadow = true;
+        ground.receiveShadow = true;
+		
+		// wall
+		pos.set( 0, 1, -10 );
+		var obstacle = createParalellepiped( 8, 10, 1, 0, pos, quat, new THREE.MeshPhongMaterial( { color: 0xaa4455 } ) );
+		obstacle.castShadow = true;
+		obstacle.receiveShadow = true;
+		
+		// Ramp
+		pos.set( 0, 0, -8 );
+		quat.setFromAxisAngle( new THREE.Vector3( 1, 0, 0 ), 45 * Math.PI / 180 );
+		var obstacle = createParalellepiped( 10, 1, 6, 0, pos, quat, new THREE.MeshPhongMaterial( { color: 0x606060 } ) );
+		obstacle.castShadow = true;
+		obstacle.receiveShadow = true;
+
+
+        // Ball
+        ballMass = params.ballMass;
+        ballRadius = params.ballRadius;
+
+        var ball = new THREE.Mesh( new THREE.SphereGeometry( ballRadius, 20, 20 ), new THREE.MeshPhongMaterial( { color: createRandomColor() } ) );
+        ball.castShadow = true;
+        ball.receiveShadow = true;
+        var ballShape = new Ammo.btSphereShape( ballRadius );
+        ballShape.setMargin( margin );
+        pos.set( -7, 2, 0 );
+        quat.set( 0, 0, 0, 1 );
+        ballBody = createRigidBody( ball, ballShape, ballMass, pos, quat, params.restitution, params.rotationFriction );
+        console.log(ballBody);
+        ball.userData.physicsBody.setFriction( 0.5 );
+
+        var ball2 = new THREE.Mesh( new THREE.SphereGeometry( ball2Radius, 20, 20 ), new THREE.MeshPhongMaterial( { color: createRandomColor() } ) );
+        ball2.castShadow = true;
+        ball2.receiveShadow = true;
+        var ball2Shape = new Ammo.btSphereShape( ball2Radius );
+        ball2Shape.setMargin( margin );
+        pos.set( 7, 2, 0 );
+        quat.set( 0, 0, 0, 1 );
+        ball2Body = createRigidBody( ball2, ball2Shape, ball2Mass, pos, quat, params.restitution2, params.rotationFriction2 );
+        console.log(ball2Body);
+        ball2.userData.physicsBody.setFriction( 0.5 );
+
+    }
+
+    function initGUI(){
+        /*
+        gravity: gravityConstant,
+        angle: 0,
+        velocity: 30,
+        brickMass: brickMass,
+        brickLength: brickLength,
+        brickDepth: brickDepth,
+        brickHeight: brickHeight
+        */
+        gui = new dat.GUI();
+        gui.add( params, 'gravity', -20, 10 ).onChange(function(){setGravity()});
+        var gui_folder1 = gui.addFolder( 'Left ball' );
+        gui_folder1.add( params, 'horizontalVelocity', 0, 20 ).onChange(function(value){params.horizontalVelocity=value});
+        gui_folder1.add( params, 'verticalVelocity', 0, 20 ).onChange(function(value){params.verticalVelocity=value});
+        gui_folder1.add( params, 'horizontalAngle', -Math.PI/2, Math.PI/2, 0.01 ).onChange(function(value){params.horizontalAngle=value});
+        gui_folder1.add( params, 'verticalAngle', -Math.PI/2, Math.PI/2, 0.01 ).onChange(function(value){params.verticalAngle=value});
+        gui_folder1.add( params, 'restitution', 0.01, 1, 0.01 ).onChange(function(value){params.restitution=value});
+        //gui_folder1.add( params, 'rotationFriction', 0.01, 1, 0.01 ).onChange(function(value){params.rotationFriction=value});
+        gui_folder1.add( params, 'ballMass', 0, 3 );
+        gui_folder1.add( params, 'ballRadius', 0, 1.5 );
+        gui_folder1.open();
+        var gui_folder2 = gui.addFolder( 'Right ball' );
+        gui_folder2.add( params, 'horizontalVelocity2', 0, 20 ).onChange(function(value){params.horizontalVelocity2=value});
+        gui_folder2.add( params, 'verticalVelocity2', 0, 20 ).onChange(function(value){params.verticalVelocity2=value});
+        gui_folder2.add( params, 'horizontalAngle2', -Math.PI/2, Math.PI/2, 0.01 ).onChange(function(value){params.horizontalAngle2=value});
+        gui_folder2.add( params, 'verticalAngle2', -Math.PI/2, Math.PI/2, 0.01 ).onChange(function(value){params.verticalAngle2=value});
+        gui_folder2.add( params, 'restitution2', 0.01, 1, 0.01 ).onChange(function(value){params.restitution2=value});
+        //gui_folder2.add( params, 'rotationFriction2', 0.01, 1, 0.01 ).onChange(function(value){params.rotationFriction2=value});
+        gui_folder2.add( params, 'ballMass2', 0, 3 );
+        gui_folder2.add( params, 'ballRadius2', 0, 1.5 );
+        gui_folder2.open();
+
+        gui.add( params, 'shoot' );
+        gui.add( params, 'recalculate');
+    }
+
+    function createParalellepiped( sx, sy, sz, mass, pos, quat, material ) {
+
+        var threeObject = new THREE.Mesh( new THREE.BoxGeometry( sx, sy, sz, 1, 1, 1 ), material );
+        var shape = new Ammo.btBoxShape( new Ammo.btVector3( sx * 0.5, sy * 0.5, sz * 0.5 ) );
+        shape.setMargin( margin );
+
+        createRigidBody( threeObject, shape, mass, pos, quat,1,1 );
+
+        return threeObject;
+
+    }
+
+    function createRigidBody( threeObject, physicsShape, mass, pos, quat, friction, restitution ) {
+
+        threeObject.position.copy( pos );
+        threeObject.quaternion.copy( quat );
+
+        var transform = new Ammo.btTransform();
+        transform.setIdentity();
+        transform.setOrigin( new Ammo.btVector3( pos.x, pos.y, pos.z ) );
+        transform.setRotation( new Ammo.btQuaternion( quat.x, quat.y, quat.z, quat.w ) );
+        var motionState = new Ammo.btDefaultMotionState( transform );
+	
+        var localInertia = new Ammo.btVector3( 0, 0, 0 );
+        physicsShape.calculateLocalInertia( mass, localInertia );
+
+        var rbInfo = new Ammo.btRigidBodyConstructionInfo( mass, motionState, physicsShape, localInertia );
+        rbInfo.set_m_rollingFriction(parseFloat(restitution));
+        var body = new Ammo.btRigidBody( rbInfo );
+        body.setFriction(0.7);
+        body.setRestitution(parseFloat(friction));
+
+        threeObject.userData.physicsBody = body;
+
+        scene.add( threeObject );
+
+        if ( mass > 0 ) {
+            rigidBodies.push( threeObject );
+
+            // Disable deactivation
+            body.setActivationState( 4 );
+        }
+
+        physicsWorld.addRigidBody( body );
+
+        return body;
+    }
+
+    function createRandomColor() {
+        return Math.floor( Math.random() * ( 1 << 24 ) );
+    }
+
+    function createMaterial() {
+        return new THREE.MeshPhongMaterial( { color: createRandomColor() } );
+    }
+
+    function initInput() {
+
+        window.addEventListener( 'keydown', function( event ) {
+
+            switch ( event.keyCode ) {
+                // W
+                case 87:
+                    v+=0.05;
+                    break;
+
+                // S
+                case 83:
+                    v-=0.05;
+                    break;
+                // D
+                case 68:
+                    u+=0.05;
+                    break;
+                // A
+                case 65:
+                    u-=0.05;
+                    break;
+            }
+
+            console.log('u = ', u, ', v = ', v);
+
+        }, false );
+
+        window.addEventListener( 'keyup', function( event ) {
+
+            //nothing
+
+        }, false );
+
+    }
+
+    function shoot(){
+        ballBody.setLinearVelocity( new Ammo.btVector3(
+            params.horizontalVelocity*Math.cos(params.horizontalAngle),
+            params.verticalVelocity*Math.sin(params.verticalAngle),
+            params.horizontalVelocity*Math.sin(params.horizontalAngle)
+        ));
+        ball2Body.setLinearVelocity( new Ammo.btVector3(
+            -params.horizontalVelocity2*Math.cos(params.horizontalAngle2),
+            params.verticalVelocity2*Math.sin(params.verticalAngle2),
+            params.horizontalVelocity2*Math.sin(params.horizontalAngle2)
+        ));
+    }
+
+    function rebuild() {
+        clearRigidBodies();
+        setGravity();
+        createObjects();
+    }
+    function clearRigidBodies() {
+        for (var i = 0; i < rigidBodies.length; i++) {
+            physicsWorld.removeRigidBody(rigidBodies[i].userData.physicsBody, true);
+            scene.remove(rigidBodies[i]);
+        }
+        rigidBodies.length = 0;
+        renderer.renderLists.dispose();
+
+    }
+
+    function setGravity() {
+        physicsWorld.setGravity( new Ammo.btVector3( 0, params.gravity, 0 ) );
+        physicsWorld.getWorldInfo().set_m_gravity( new Ammo.btVector3( 0, params.gravity, 0 ) );
+        console.log('set gravity to ', params.gravity);
+    }
+
+    function onWindowResize() {
+
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+
+        renderer.setSize( window.innerWidth, window.innerHeight );
+
+    }
+
+    function animate() {
+
+        requestAnimationFrame( animate );
+
+        render();
+        stats.update();
+
+    }
+
+    function render() {
+
+        var deltaTime = clock.getDelta();
+
+        updatePhysics( deltaTime );
+
+        renderer.render( scene, camera );
+
+        time += deltaTime;
+
+    }
+
+    function updatePhysics( deltaTime ) {
+
+
+        // Step world
+        physicsWorld.stepSimulation( deltaTime, 10 );
+
+        // Update rigid bodies
+        for ( var i = 0, il = rigidBodies.length; i < il; i++ ) {
+            var objThree = rigidBodies[ i ];
+            var objPhys = objThree.userData.physicsBody;
+            var ms = objPhys.getMotionState();
+            if ( ms ) {
+
+                ms.getWorldTransform( transformAux1 );
+                var p = transformAux1.getOrigin();
+                var q = transformAux1.getRotation();
+                objThree.position.set( p.x(), p.y(), p.z() );
+                objThree.quaternion.set( q.x(), q.y(), q.z(), q.w() );
+
+            }
+        }
+
+    }
+
+</script>
+
+</body>
+</html>
